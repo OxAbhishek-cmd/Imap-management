@@ -1,13 +1,12 @@
 const Imap = require('imap');
 const simpleParser = require('mailparser').simpleParser;
-const { JSDOM } = require('jsdom');
-const fs= require("fs");
+const fs = require("fs");
 const cleanHTMLString = (input) => {
 
   let data = input.replace(/<!doctype html>([\s\S]*?)<\/head>/, "")
   data = data.replace(/<\/html>/, "");
-  data= data.replace(/\\n/,"")
-  fs.writeFileSync("newlyyy.html",data);
+  data = data.replace(/\\n/, "")
+  fs.writeFileSync("newlyyy.html", data);
   return data;
 }
 
