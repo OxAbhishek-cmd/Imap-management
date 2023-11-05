@@ -4,25 +4,22 @@ const User = require('../models/User');
 const { nodemail } = require('./nodemailer');
 const JWT_SECRET = process.env.JWT_SECRET;
 const { validationResult } = require('express-validator');
-const Log = require('../models/Log');
-//generate a JWT token
-function generateToken(payload, expiresIn = undefined) {
-    return jwt.sign(payload, JWT_SECRET, { expiresIn });
-}
 
-//generate hashpassword
-async function generateHashPassword(password) {
-    const salt = process.env.SALT
+// Generate a JWT token
+const generateToken = (payload, expiresIn = undefined) =>
+    jwt.sign(payload, JWT_SECRET, { expiresIn });
+
+// Generate hash password
+const generateHashPassword = async (password) => {
+    const salt = process.env.SALT;
     return await bcrypt.hash(password, salt);
-}
+};
 
-//check password
-async function isMatch(byUser, byDatabase) {
-    return await bcrypt.compare(byUser, byDatabase)
-}
+// Check if the password matches
+const isMatch = async (byUser, byDatabase) => bcrypt.compare(byUser, byDatabase);
 
-// To send password reset email
-async function sendPasswordResetEmail(email, resetLink) {
+// Send password reset email
+const sendPasswordResetEmail = async (email, resetLink) => {
     const response = await nodemail(email, 'Verify Forget Password', `
         <div style="font-family: Arial, sans-serif;">
             <style>p { font-size: 16px; line-height: 1.5; }</style>
@@ -37,40 +34,35 @@ async function sendPasswordResetEmail(email, resetLink) {
     `);
 
     return response.response ? 'Password reset email sent successfully' : 'Unable to send mail';
-}
+};
 
-async function logDetails(action, ipAddress, user_id = undefined) {
-    const log = new Log({ user_id, action, ipAddress });
-    log.save();
-}
+// Handle errors in a uniform way
+const handleError = (res, statusCode, errorMessage) => {
+    return res.status(statusCode).json({ status: 'error', error: errorMessage });
+};
 
 // Register a new user
 exports.registerUser = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-        logDetails('Validation failed during registration', req.ip);
-        return res.status(400).json({ errors: errors.array() });
+        return handleError(res, 400, errors.array());
     }
-
     const { email, password, name } = req.body;
     try {
         const user = await User.findOne({ email });
         if (user) {
-            logDetails(`${email} trying to create an account, but the account already exists.`, req.ip);
-            return res.status(400).json({ error: 'Email already exists' });
+            return handleError(res, 409, 'Email already exists');
         }
 
         const hashedPassword = await generateHashPassword(password);
         const newUser = new User({ email, password: hashedPassword, name });
 
         newUser.save();
-        logDetails(`${email},${name} Created a new Account.`, req.ip, newUser.id);
         const authtoken = generateToken({ user_id: newUser.id }, "7d");
-        return res.status(200).json({ authtoken, error: null });
+        return res.status(201).json({ status: 'success', authtoken, error: null });
     } catch (error) {
         console.error(error);
-        logDetails('Registration failed', req.ip);
-        return res.status(500).json({ error: 'Registration failed' });
+        return handleError(res, 500, 'Registration failed');
     }
 };
 
@@ -78,30 +70,24 @@ exports.registerUser = async (req, res) => {
 exports.loginUser = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-        logDetails('Validation failed during login', req.ip); // Log validation failure
-        return res.status(400).json({ errors: errors.array() });
+        return handleError(res, 400, errors.array());
     }
 
     const { email, password } = req.body;
     try {
         const user = await User.findOne({ email });
         if (!user) {
-            logDetails(`Trying to unauthorized access using invalid credentials`, req.ip);
-            return res.status(404).json({ error: 'User not found' });
+            return handleError(res, 404, 'User not found');
         }
-
-        if (isMatch(password, user.password)) {
+        if (await isMatch(password, user.password)) {
             const token = generateToken({ user_id: user.id }, "7d");
-            logDetails(`${email} user Logged in`, req.ip, user.id);
-            return res.status(201).json({ error: null, authtoken: token, name: user.name });
+            return res.status(200).json({ status: 'success', error: null, authtoken: token, name: user.name });
         } else {
-            logDetails(`${email} trying to unauthorized access using an invalid password`, req.ip);
-            return res.status(400).json({ error: 'Incorrect password' });
+            return handleError(res, 401, 'Incorrect password');
         }
     } catch (error) {
         console.error(error);
-        logDetails('Login failed', req.ip);
-        return res.status(500).json({ error: 'Login failed' });
+        return handleError(res, 500, 'Login failed');
     }
 };
 
@@ -111,76 +97,67 @@ exports.getUser = async (req, res) => {
     try {
         const user = await User.findById(user_id);
         if (user) {
-            logDetails('User accessed their profile', req.ip, user.id); // Log user profile access
-            return res.status(200).json({ error: null, name: user.name });
+            return res.status(200).json({ status: 'success', error: null, name: user.name });
         } else {
-            logDetails('Invalid Credentials when accessing profile', req.ip, user_id); // Log invalid profile access
-            return res.status(404).json({ error: 'Invalid Credentials' });
+            return handleError(res, 404, 'Invalid Credentials');
         }
     } catch (error) {
         console.error(error);
-        logDetails('Something went wrong when accessing profile', req.ip, user_id); // Log error
-        res.status(500).json({ error: 'Something went wrong' });
+        return handleError(res, 500, 'Something went wrong');
     }
 };
-
 // Update Credentials
 exports.updateUser = async (req, res) => {
     const user_id = req.user.user_id;
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-        logDetails('Validation failed on credentials update', req.ip, user_id); // validation failure
-        return res.status(400).json({ errors: errors.array() });
+        return handleError(res, 400, errors.array());
     }
     const { name, email, password } = req.body;
     try {
         const user = await User.findById(user_id);
         if (!user) {
-            logDetails('Trying to Change Credentials using invalid Credentials', req.ip, user_id); // Log unauthorized access
-            return res.status(404).json({ error: 'Invalid Credentials' });
+            return handleError(res, 404, 'Invalid Credentials');
         }
-        if (isMatch(password, user.password)) {
-            await User.findByIdAndUpdate(user_id, { $set: { name: name || user.name, email: email || user.email } });
-            logDetails('Credentials Updated', req.ip, user_id); // Log successful update
-            return res.status(200).json({ error: null, status: 'success' });
+        // Verify the old password
+        const isPasswordMatch = await bcrypt.compare(password, user.password);
+        if (isPasswordMatch) {
+            await User.findByIdAndUpdate(user_id, { $set: { name: name || user.name, email: email || user.email,tokenInvalidatedAt:new Date() } });
+            return res.status(200).json({ status: 'success', error: null });
         } else {
-            logDetails('Trying to Change Credentials using invalid password', req.ip, user_id); // Log unauthorized access
-            return res.status(400).json({ error: 'Incorrect password' });
+            return handleError(res, 401, 'Incorrect password');
         }
     } catch (error) {
         console.error(error);
-        logDetails('Something went wrong when updating profile', req.ip, user_id); // Log error
-        res.status(500).json({ error: 'Something went wrong' });
+        return handleError(res, 500, 'Something went wrong');
     }
 };
+
 
 // Update Password
 exports.updatePassword = async (req, res) => {
     const user_id = req.user.user_id;
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-        logDetails('Validation failed on Password update', req.ip, user_id); // validation failure
-        return res.status(400).json({ errors: errors.array() });
+        return handleError(res, 400, errors.array());
     }
     const { password, newPassword } = req.body;
     try {
         const user = await User.findById(user_id);
         if (!user) {
-            logDetails('Invalid Credentials when updating password', req.ip, user_id); // Log invalid password update
-            return res.status(404).json({ error: 'Invalid Credentials' });
+            return handleError(res, 404, 'Invalid Credentials');
         }
-        if (isMatch(password, user.password)) {
-            await User.findByIdAndUpdate(user_id, { $set: { password: await generateHashPassword(newPassword) } });
-            logDetails('Password Updated', req.ip, user_id); // Log successful password update
-            res.status(202).json({ error: null, status: 'success' });
-        } else {
-            logDetails('Incorrect password when updating password', req.ip, user_id); // Log incorrect password update
-            res.status(400).json({ error: 'Incorrect password' });
+        if (await !isMatch(password, user.password)) {
+            return handleError(res, 401, 'Incorrect password');
         }
+        user.tokenInvalidatedAt = new Date(); // Set the current timestamp
+        await user.save();
+        const User = User.findByIdAndUpdate(user_id, { $set: { password: await generateHashPassword(newPassword) } });
+        const authtoken = generateToken({ user_id: newUser.id }, "7d");
+        return res.status(202).json({ status: 'success', error: null ,authtoken});
     } catch (error) {
         console.error(error);
-        logDetails('Something went wrong when updating password', req.ip, user_id); // Log error
-        res.status(500).json({ error: 'Something went wrong' });
+        return handleError(res, 500, 'Something went wrong');
     }
 };
 
@@ -189,25 +166,21 @@ exports.forgetPasswordApproval = async (req, res) => {
     const { email } = req.body;
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-        logDetails('Trying unapperopriate way to Reset Password', req.ip); // validation failure
-        return res.status(400).json({ errors: errors.array() });
+        return handleError(res, 400, errors.array());
     }
     const user = await User.findOne({ email });
     try {
         if (!user) {
-            logDetails('Forget password request failed - Invalid Credentials', req.ip, user.id); // Log invalid forget password request
-            return res.status(404).json({ error: 'Invalid Credentials' });
+            return handleError(res, 404, 'Invalid Credentials');
         }
 
         const resetToken = generateToken({ user_id: user.id, reason: 'forget password request' }, '30m');
         const resetLink = `${process.env.DOMAIN}/reset-password/${resetToken}`;
-        logDetails('Forget password email sent', req.ip, user.id); // Log forget password email sent
         const message = await sendPasswordResetEmail(user.email, resetLink);
-        res.status(200).json({ message });
+        return res.status(200).json({ status: 'success', message });
     } catch (error) {
         console.error(error);
-        logDetails('Something went wrong with forget password request', req.ip, user.id); // Log error
-        res.status(500).json({ error: 'Something went wrong' });
+        return handleError(res, 500, 'Something went wrong');
     }
 };
 
@@ -216,16 +189,15 @@ exports.forgetPasswordSuccess = async (req, res) => {
     const { user_id, reason } = req.user;
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-        logDetails('Invalid Response on Reset', req.ip); // validation failure
-        return res.status(400).json({ errors: errors.array() });
+        return handleError(res, 400, errors.array());
     }
     if (reason !== 'forget password request') {
-        return res.status(403).json({ error: 'Unauthorized Action' });
+        return handleError(res, 403, 'Unauthorized Action');
     }
     try {
         const user = await User.findById(user_id);
 
-        if (!user) return res.status(404).json({ error: 'Invalid User' });
+        if (!user) return handleError(res, 404, 'Invalid User');
 
         const isTokenExpired = (decodedToken) => {
             const now = Math.floor(Date.now() / 1000);
@@ -235,16 +207,15 @@ exports.forgetPasswordSuccess = async (req, res) => {
         const decodedToken = jwt.decode(req.header('auth-token'), { complete: true });
 
         if (isTokenExpired(decodedToken)) {
-            return res.status(400).json({ error: 'Token has expired' });
+            return handleError(res, 400, 'Token has expired');
         }
 
         const hashedPassword = await generateHashPassword(newPassword);
-        await User.findByIdAndUpdate(user_id, { $set: { password: hashedPassword } });
-        logDetails('Password reset successful', req.ip, user_id); // Log password reset success
-        res.status(200).json({ message: 'Password reset successful' });
+        await User.findByIdAndUpdate(user_id, { $set: { password: hashedPassword,tokenInvalidatedAt:new Date() } });
+        const authtoken = generateToken({ user_id: newUser.id }, "7d");
+        res.status(200).json({ status: 'success', message: 'Password reset successful', authtoken});
     } catch (error) {
         console.error(error);
-        logDetails('Something went wrong with forget password success', req.ip, user_id); // Log error
-        res.status(500).json({ error: 'Something went wrong' });
+        handleError(res, 500, 'Something went wrong');
     }
 };

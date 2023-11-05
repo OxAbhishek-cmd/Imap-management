@@ -1,22 +1,34 @@
 const express = require('express');
 const router = express.Router();
 const EmailController = require('../controllers/emailController');
-const fetchuser = require('../middleware/fetchUser');
+const fetchUser = require('../middleware/fetchUser');
 const { body } = require('express-validator');
 
-router.post("/checkemail",[body("email","Invalid Email Address").isEmail(),body("password","Password must be correct").isAscii(),body("host","Invalid Host address").isAscii(),body("port","Invalid Port Number").isAlphanumeric()],fetchuser,EmailController.checkemail)
-
-// Route to set emails
-router.post('/setemail',[body("email","Invalid Email Address").isEmail(),body("password","Password must be correct").isAscii(),body("host","Invalid Host address").isAscii(),body("port","Invalid Port Number").isAlphanumeric()], fetchuser,EmailController.setEmail);
+// Route to set email
+router.post('/setemail',
+    [
+        body('email', 'Invalid Email Address').isEmail(),
+        body('password', 'Password must be correct').isAscii(),
+        body('host', 'Invalid Host address').isAscii(),
+        body('shouldVerify', 'Action not mentioned').isBoolean(),
+    ],
+    fetchUser,
+    EmailController.setEmail
+);
 
 // Route to get email
-router.get('/getemail', fetchuser, EmailController.getEmail);
+router.get('/getemail', fetchUser, EmailController.getEmail);
 
 // Route to delete email
-router.delete('/deleteemail', fetchuser, EmailController.deleteEmail);
+router.delete('/deleteemail/:email_id', fetchUser, EmailController.deleteEmail);
 
-// Route to put email
-router.put('/updateemail', fetchuser, EmailController.updateEmail);
+// Route to update email
+router.put('/updateemail/:email_id', fetchUser, EmailController.updateEmail);
 
+// Route to sync email
+router.post('/syncemail/:email_id', fetchUser, EmailController.syncData);
+
+// Route to change email order
+router.put('/changeorder/:email_id', fetchUser, EmailController.changeOrder);
 
 module.exports = router;
